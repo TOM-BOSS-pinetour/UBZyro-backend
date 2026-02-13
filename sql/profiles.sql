@@ -7,6 +7,9 @@ create table if not exists public.profiles (
   last_name text not null,
   work_types text[],
   service_area text[],
+  rating numeric(3,2),
+  orders int,
+  years int,
   created_at timestamptz not null default now()
 );
 

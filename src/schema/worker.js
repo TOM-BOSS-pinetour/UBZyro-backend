@@ -1,3 +1,22 @@
+const serviceKeys = [
+  "electric",
+  "plumbing",
+  "lock",
+  "paint",
+  "carpenter",
+  "clean",
+  "heat",
+  "internet",
+  "ac",
+  "security",
+  "glass",
+  "furniture",
+  "floor",
+  "roof",
+  "moving",
+  "garden",
+];
+
 const workerSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
   title: "Worker",
@@ -40,8 +59,7 @@ const workerSchema = {
       uniqueItems: true,
       items: {
         type: "string",
-        minLength: 1,
-        maxLength: 50,
+        enum: serviceKeys,
       },
     },
     service_area: {
