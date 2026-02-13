@@ -9,12 +9,27 @@ const validateProfile = buildValidator(profileSchema);
 // Жишээ: profiles хүснэгтээс унших (JWT байвал RLS policy чинь ажиллана)
 router.get("/", async (req, res) => {
   try {
-    const supabase = supabaseForRequest(req);
+    const supabase = supabaseAdmin || supabaseForRequest(req);
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .limit(50);
+    const email =
+      typeof req.query.email === "string" ? req.query.email.trim() : "";
+
+    if (email) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .ilike("email", email)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (error) return res.status(400).json({ error: error.message });
+      if (!data || data.length === 0) {
+        return res.status(404).json({ error: "Profile not found" });
+      }
+      return res.json({ data: data[0] });
+    }
+
+    const { data, error } = await supabase.from("profiles").select("*").limit(50);
 
     if (error) return res.status(400).json({ error: error.message });
     return res.json({ data });
