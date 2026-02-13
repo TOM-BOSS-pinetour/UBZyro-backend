@@ -27,16 +27,6 @@ const userSchema = {
       minLength: 1,
       maxLength: 60,
     },
-    work_types: {
-      type: "array",
-      minItems: 1,
-      uniqueItems: true,
-      items: {
-        type: "string",
-        minLength: 1,
-        maxLength: 50,
-      },
-    },
   },
 };
 

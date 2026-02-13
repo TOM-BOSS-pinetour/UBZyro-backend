@@ -1,17 +1,14 @@
-const workerSchema = {
+const profileSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  title: "Worker",
+  title: "Profile",
   type: "object",
   additionalProperties: false,
-  required: [
-    "email",
-    "phone_number",
-    "first_name",
-    "last_name",
-    "work_types",
-    "service_area",
-  ],
+  required: ["email", "phone_number", "first_name", "last_name", "role"],
   properties: {
+    role: {
+      type: "string",
+      enum: ["user", "worker"],
+    },
     email: {
       type: "string",
       format: "email",
@@ -55,6 +52,30 @@ const workerSchema = {
       },
     },
   },
+  allOf: [
+    {
+      if: {
+        properties: {
+          role: { const: "worker" },
+        },
+      },
+      then: {
+        required: ["work_types", "service_area"],
+      },
+    },
+    {
+      if: {
+        properties: {
+          role: { const: "user" },
+        },
+      },
+      then: {
+        not: {
+          anyOf: [{ required: ["work_types"] }, { required: ["service_area"] }],
+        },
+      },
+    },
+  ],
 };
 
-module.exports = workerSchema;
+module.exports = profileSchema;
