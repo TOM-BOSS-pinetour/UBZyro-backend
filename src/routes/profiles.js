@@ -93,6 +93,35 @@ router.get("/", async (req, res) => {
   }
 });
 
+// id-аар профайл авах
+router.get("/:id", async (req, res) => {
+  try {
+    const supabase = supabaseAdmin || supabaseForRequest(req);
+    const id = typeof req.params.id === "string" ? req.params.id.trim() : "";
+    if (!id) return res.status(400).json({ error: "Missing id" });
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      const status = error.code === "PGRST116" ? 404 : 400;
+      return res.status(status).json({
+        error: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+    }
+
+    return res.json({ data });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
 // insert (service_role байвал admin-аар, эсвэл JWT-ээр)
 router.post("/", (req, res, next) => {
   if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
@@ -112,6 +141,7 @@ router.post("/", (req, res, next) => {
   try {
     const supabase = supabaseAdmin || supabaseForRequest(req);
     const payload = {
+      ...(req.body.id ? { id: req.body.id } : {}),
       role: req.body.role,
       email: req.body.email,
       phone_number: req.body.phone_number,
@@ -154,6 +184,7 @@ router.put("/", prepareProfileUpdate, validateProfile, async (req, res) => {
     const supabase = supabaseAdmin || supabaseForRequest(req);
     const existing = res.locals.existingProfile ?? null;
     const payload = {
+      ...(req.body.id ? { id: req.body.id } : {}),
       role: req.body.role,
       email: req.body.email,
       phone_number: req.body.phone_number,

@@ -24,6 +24,10 @@ const profileSchema = {
   additionalProperties: false,
   required: ["email", "phone_number", "first_name", "last_name", "role"],
   properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+    },
     role: {
       type: "string",
       enum: ["user", "worker"],

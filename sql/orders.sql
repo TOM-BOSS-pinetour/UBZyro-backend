@@ -16,6 +16,12 @@ create table if not exists public.orders (
   attachment_urls text[] not null default '{}',
   latitude double precision,
   longitude double precision,
+  accepted_at timestamptz,
+  rejected_at timestamptz,
+  cancelled_at timestamptz,
+  en_route_at timestamptz,
+  in_progress_at timestamptz,
+  completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
