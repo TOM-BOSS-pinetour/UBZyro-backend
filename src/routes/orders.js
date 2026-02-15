@@ -1,5 +1,5 @@
 const express = require("express");
-const { supabaseAdmin, supabaseForRequest } = require("../supabase/client");
+const { supabaseForRequest } = require("../supabase/client");
 const orderSchema = require("../schema/order");
 const { buildValidator } = require("../schema/validate");
 
@@ -83,61 +83,40 @@ const validateOrderRules = (req, res, next) => {
   return next();
 };
 
-const normalizeEmail = (value) =>
-  typeof value === "string" ? value.trim().toLowerCase() : "";
-
 const normalizeId = (value) =>
   typeof value === "string" ? value.trim() : "";
 
+const getAuthUser = async (supabase) => {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user?.id) return null;
+  return data.user;
+};
+
 router.get("/", async (req, res) => {
   try {
-    const supabase = supabaseAdmin || supabaseForRequest(req);
-    const email = normalizeEmail(req.query.email);
-    const userProfileId = normalizeId(req.query.user_profile_id);
-    const workerEmail = normalizeEmail(req.query.worker_email);
+    const supabase = supabaseForRequest(req);
+    const authUser = await getAuthUser(supabase);
+    if (!authUser) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const workerEmail =
+      typeof req.query.worker_email === "string"
+        ? req.query.worker_email.trim()
+        : "";
     const workerProfileId = normalizeId(req.query.worker_profile_id);
+    const userEmail =
+      typeof req.query.email === "string" ? req.query.email.trim() : "";
+    const userProfileId = normalizeId(req.query.user_profile_id);
     const limitRaw =
       typeof req.query.limit === "string" ? Number(req.query.limit) : null;
     const limit =
       Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 50) : 20;
 
-    let resolvedUserId = userProfileId;
-    let resolvedWorkerId = workerProfileId;
-
-    if (!resolvedWorkerId && workerEmail) {
-      const { data: profiles, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, email, created_at")
-        .ilike("email", workerEmail)
-        .eq("role", "worker")
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (profileError) {
-        return res.status(400).json({ error: profileError.message });
-      }
-      resolvedWorkerId = profiles?.[0]?.id ?? "";
-    }
-
-    if (!resolvedUserId && email) {
-      const { data: profiles, error: profileError } = await supabase
-        .from("profiles")
-        .select("id, email, created_at")
-        .ilike("email", email)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (profileError) {
-        return res.status(400).json({ error: profileError.message });
-      }
-      resolvedUserId = profiles?.[0]?.id ?? "";
-    }
-
-    if (!resolvedWorkerId && !resolvedUserId) {
-      return res.status(400).json({
-        error: "Missing user_profile_id/email or worker_profile_id/worker_email",
-      });
-    }
+    const wantsWorker = !!(workerEmail || workerProfileId);
+    const wantsUser = !!(userEmail || userProfileId);
+    const resolvedWorkerId = wantsWorker ? authUser.id : "";
+    const resolvedUserId = !wantsWorker || wantsUser ? authUser.id : "";
 
     let query = supabase
       .from("orders")
@@ -162,7 +141,11 @@ router.get("/", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
-    const supabase = supabaseAdmin || supabaseForRequest(req);
+    const supabase = supabaseForRequest(req);
+    const authUser = await getAuthUser(supabase);
+    if (!authUser) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     const id = normalizeId(req.params.id);
     const status =
       typeof req.body?.status === "string" ? req.body.status.trim() : "";
@@ -182,6 +165,31 @@ router.patch("/:id", async (req, res) => {
 
     if (!allowed.includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
+    }
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id, user_profile_id, worker_profile_id")
+      .eq("id", id)
+      .single();
+
+    if (orderError) {
+      const statusCode = orderError.code === "PGRST116" ? 404 : 400;
+      return res.status(statusCode).json({ error: orderError.message });
+    }
+
+    const isParticipant =
+      order?.user_profile_id === authUser.id ||
+      order?.worker_profile_id === authUser.id;
+
+    if (!isParticipant) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (["accepted", "rejected"].includes(status)) {
+      if (order?.worker_profile_id !== authUser.id) {
+        return res.status(403).json({ error: "Worker only" });
+      }
     }
 
     const statusTimestampMap = {
@@ -231,7 +239,15 @@ router.post(
   validateOrderRules,
   async (req, res) => {
   try {
-    const supabase = supabaseAdmin || supabaseForRequest(req);
+    const supabase = supabaseForRequest(req);
+    const authUser = await getAuthUser(supabase);
+    if (!authUser) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const incomingUserId = normalizeId(req.body.user_profile_id);
+    if (incomingUserId && incomingUserId !== authUser.id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     const payload = {
       service_key: req.body.service_key,
       service_label: req.body.service_label,
@@ -241,9 +257,9 @@ router.post(
       address: req.body.address,
       description: req.body.description,
       urgency: req.body.urgency,
-      status: req.body.status,
       attachment_urls: req.body.attachment_urls,
-      user_profile_id: req.body.user_profile_id,
+      status: "pending",
+      user_profile_id: incomingUserId || authUser.id,
       worker_profile_id: req.body.worker_profile_id,
       latitude: req.body.latitude,
       longitude: req.body.longitude,
