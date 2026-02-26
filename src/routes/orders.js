@@ -2,6 +2,7 @@ const express = require("express");
 const { supabaseForRequest } = require("../supabase/client");
 const orderSchema = require("../schema/order");
 const { buildValidator } = require("../schema/validate");
+const { createInvoice } = require("../services/bonum");
 
 const router = express.Router();
 
@@ -226,6 +227,166 @@ router.patch("/:id", async (req, res) => {
         code: error.code,
       });
     }
+    return res.json({ data });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/:id/complete", async (req, res) => {
+  try {
+    const supabase = supabaseForRequest(req);
+    const authUser = await getAuthUser(supabase);
+    if (!authUser) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const id = normalizeId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Missing id" });
+
+    const amountRaw = req.body?.payment_amount;
+    const paymentAmount =
+      typeof amountRaw === "number" ? amountRaw : Number(amountRaw);
+    const paymentMethod =
+      typeof req.body?.payment_method === "string"
+        ? req.body.payment_method.trim()
+        : "";
+
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      return res.status(400).json({ error: "Invalid payment_amount" });
+    }
+
+    const allowedMethods = ["cash", "bank_app"];
+    if (!allowedMethods.includes(paymentMethod)) {
+      return res.status(400).json({ error: "Invalid payment_method" });
+    }
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id, status, worker_profile_id, payment_status")
+      .eq("id", id)
+      .single();
+
+    if (orderError) {
+      const statusCode = orderError.code === "PGRST116" ? 404 : 400;
+      return res.status(statusCode).json({ error: orderError.message });
+    }
+
+    if (order?.worker_profile_id !== authUser.id) {
+      return res.status(403).json({ error: "Worker only" });
+    }
+
+    if (["cancelled", "rejected"].includes(order?.status)) {
+      return res.status(400).json({ error: "Order cannot be completed" });
+    }
+    if (order?.payment_status === "paid") {
+      return res.status(400).json({ error: "Order already paid" });
+    }
+
+    const updatePayload = {
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      payment_amount: paymentAmount,
+      payment_method: paymentMethod,
+      payment_status: "pending",
+      payment_provider: paymentMethod === "bank_app" ? "bonum" : null,
+      payment_invoice_id: null,
+      payment_followup_link: null,
+      payment_transaction_id: id,
+      payment_paid_at: null,
+    };
+
+    if (paymentMethod === "bank_app") {
+      const invoice = await createInvoice({
+        amount: paymentAmount,
+        transactionId: id,
+        expiresInSeconds: 1800,
+      });
+      updatePayload.payment_invoice_id = invoice.invoiceId;
+      updatePayload.payment_followup_link = invoice.followUpLink;
+    }
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update(updatePayload)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(400).json({
+        error: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+    }
+
+    return res.json({ data });
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/:id/payment/confirm-cash", async (req, res) => {
+  try {
+    const supabase = supabaseForRequest(req);
+    const authUser = await getAuthUser(supabase);
+    if (!authUser) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const id = normalizeId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Missing id" });
+
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select("id, status, worker_profile_id, payment_method, payment_status")
+      .eq("id", id)
+      .single();
+
+    if (orderError) {
+      const statusCode = orderError.code === "PGRST116" ? 404 : 400;
+      return res.status(statusCode).json({ error: orderError.message });
+    }
+
+    if (order?.worker_profile_id !== authUser.id) {
+      return res.status(403).json({ error: "Worker only" });
+    }
+
+    if (order?.status !== "completed") {
+      return res.status(400).json({ error: "Order is not completed" });
+    }
+
+    if (order?.payment_method !== "cash") {
+      return res.status(400).json({ error: "Payment method is not cash" });
+    }
+
+    if (order?.payment_status !== "pending") {
+      return res.status(400).json({ error: "Payment status is not pending" });
+    }
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({
+        payment_status: "paid",
+        payment_paid_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(400).json({
+        error: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code,
+      });
+    }
+
     return res.json({ data });
   } catch (e) {
     return res.status(500).json({ error: e.message });
