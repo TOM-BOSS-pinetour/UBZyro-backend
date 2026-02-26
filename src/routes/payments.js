@@ -4,6 +4,14 @@ const { verifyWebhook } = require("../services/bonum");
 
 const router = express.Router();
 
+router.get("/bonum/webhook", (_req, res) => {
+  res
+    .status(200)
+    .send(
+      "Төлбөрийн баталгаажуулалт амжилттай. Апп руугаа буцаж орно уу.",
+    );
+});
+
 router.post("/bonum/webhook", async (req, res) => {
   try {
     const checksum = req.get("x-checksum-v2");
