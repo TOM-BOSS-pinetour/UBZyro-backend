@@ -55,11 +55,13 @@ const getAccessToken = async () => {
   return fetchAccessToken();
 };
 
-const createInvoice = async ({ amount, transactionId, expiresInSeconds }) => {
-  if (!BONUM_INVOICE_CALLBACK_URL) {
-    throw new Error("Missing BONUM_INVOICE_CALLBACK_URL");
-  }
-  const token = await getAccessToken();
+const isTokenInvalid = (response, payload) => {
+  if (response?.status === 401) return true;
+  const message = payload?.message || payload?.error || "";
+  return typeof message === "string" && message.toLowerCase().includes("token");
+};
+
+const sendCreateInvoice = async ({ amount, transactionId, expiresInSeconds, token }) => {
   const response = await fetch(
     `${getApiBaseUrl()}/bonum-gateway/ecommerce/invoices`,
     {
@@ -77,8 +79,32 @@ const createInvoice = async ({ amount, transactionId, expiresInSeconds }) => {
       }),
     },
   );
-
   const payload = await response.json().catch(() => null);
+  return { response, payload };
+};
+
+const createInvoice = async ({ amount, transactionId, expiresInSeconds }) => {
+  if (!BONUM_INVOICE_CALLBACK_URL) {
+    throw new Error("Missing BONUM_INVOICE_CALLBACK_URL");
+  }
+  let token = await getAccessToken();
+  let { response, payload } = await sendCreateInvoice({
+    amount,
+    transactionId,
+    expiresInSeconds,
+    token,
+  });
+
+  if (!response.ok && isTokenInvalid(response, payload)) {
+    token = await fetchAccessToken();
+    ({ response, payload } = await sendCreateInvoice({
+      amount,
+      transactionId,
+      expiresInSeconds,
+      token,
+    }));
+  }
+
   if (!response.ok) {
     const message =
       payload?.message ?? payload?.error ?? `HTTP ${response.status}`;
