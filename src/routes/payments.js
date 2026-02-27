@@ -16,8 +16,15 @@ router.post("/bonum/webhook", async (req, res) => {
   try {
     const checksum = req.get("x-checksum-v2");
     const rawBody = req.rawBody || "";
+    const rawBodyStr = Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : String(rawBody);
+    console.log("Bonum webhook received", {
+      at: new Date().toISOString(),
+      headers: req.headers,
+      body: req.body,
+      rawBody: rawBodyStr,
+    });
     const { valid, skipped } = verifyWebhook(rawBody, checksum);
-    if (!valid) {
+    if (!valid && !skipped) {
       return res.status(400).json({ error: "Invalid checksum" });
     }
     if (skipped) {
