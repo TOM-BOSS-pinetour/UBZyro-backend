@@ -72,20 +72,44 @@ router.post("/bonum/webhook", async (req, res) => {
       updated_at: new Date().toISOString(),
     };
 
-    let query = supabaseAdmin.from("orders").update(updatePayload);
+    const orFilters = [];
     if (invoiceId) {
-      query = query.eq("payment_invoice_id", invoiceId);
-    } else {
-      query = query.eq("payment_transaction_id", transactionId);
+      orFilters.push(`payment_invoice_id.eq.${invoiceId}`);
+    }
+    if (transactionId) {
+      orFilters.push(`payment_transaction_id.eq.${transactionId}`);
+      orFilters.push(`id.eq.${transactionId}`);
     }
 
-    const { data, error } = await query.select("id, payment_status");
+    const { data, error } = await supabaseAdmin
+      .from("orders")
+      .update(updatePayload)
+      .or(orFilters.join(","))
+      .select("id, payment_status, payment_invoice_id, payment_transaction_id");
+
     if (error) {
+      console.error("Bonum webhook update failed", {
+        invoiceId,
+        transactionId,
+        status,
+        error: error.message,
+      });
       return res.status(400).json({ error: error.message });
     }
     if (!data || data.length === 0) {
+      console.warn("Bonum webhook order not found", {
+        invoiceId,
+        transactionId,
+        status,
+      });
       return res.status(404).json({ error: "Order not found" });
     }
+    console.log("Bonum webhook updated orders", {
+      count: data.length,
+      invoiceId,
+      transactionId,
+      status,
+    });
 
     return res.status(200).json({ ok: true });
   } catch (e) {
