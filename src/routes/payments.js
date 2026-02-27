@@ -42,8 +42,14 @@ router.post("/bonum/webhook", async (req, res) => {
       return res.status(200).json({ ok: true });
     }
 
-    const status = payload.status;
     const body = payload.body || {};
+    const statusRaw =
+      typeof payload.status === "string"
+        ? payload.status
+        : typeof body.status === "string"
+          ? body.status
+          : "";
+    const status = statusRaw.trim().toUpperCase();
     const invoiceId = body.invoiceId;
     const transactionId = body.transactionId;
     const paidAt =
@@ -53,9 +59,15 @@ router.post("/bonum/webhook", async (req, res) => {
       return res.status(400).json({ error: "Missing invoiceId" });
     }
 
+    const isPaid = status === "SUCCESS" || status === "PAID";
+    const isFailed = status === "FAILED" || status === "CANCELLED";
+    if (!isPaid && !isFailed) {
+      return res.status(200).json({ ok: true });
+    }
+
     const updatePayload = {
-      payment_status: status === "SUCCESS" ? "paid" : "failed",
-      payment_paid_at: status === "SUCCESS" ? paidAt || new Date().toISOString() : null,
+      payment_status: isPaid ? "paid" : "failed",
+      payment_paid_at: isPaid ? paidAt || new Date().toISOString() : null,
       payment_transaction_id: transactionId || null,
       updated_at: new Date().toISOString(),
     };
@@ -64,12 +76,15 @@ router.post("/bonum/webhook", async (req, res) => {
     if (invoiceId) {
       query = query.eq("payment_invoice_id", invoiceId);
     } else {
-      query = query.eq("id", transactionId);
+      query = query.eq("payment_transaction_id", transactionId);
     }
 
-    const { error } = await query;
+    const { data, error } = await query.select("id, payment_status");
     if (error) {
       return res.status(400).json({ error: error.message });
+    }
+    if (!data || data.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
     }
 
     return res.status(200).json({ ok: true });
