@@ -61,7 +61,12 @@ const isTokenInvalid = (response, payload) => {
   return typeof message === "string" && message.toLowerCase().includes("token");
 };
 
-const sendCreateInvoice = async ({ amount, transactionId, expiresInSeconds, token }) => {
+const sendCreateInvoice = async ({
+  amount,
+  transactionId,
+  expiresInSeconds,
+  token,
+}) => {
   const response = await fetch(
     `${getApiBaseUrl()}/bonum-gateway/ecommerce/invoices`,
     {
