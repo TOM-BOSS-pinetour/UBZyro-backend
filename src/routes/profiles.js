@@ -5,6 +5,70 @@ const { buildValidator } = require("../schema/validate");
 
 const router = express.Router();
 const validateProfile = buildValidator(profileSchema);
+const withProfileUrl = (item) => ({
+  ...item,
+  profile_url:
+    typeof item?.profile_url === "string"
+      ? item.profile_url
+      : typeof item?.avatar_url === "string"
+        ? item.avatar_url
+        : null,
+});
+
+const hasMissingColumnError = (error, column) => {
+  const message = String(error?.message ?? "").toLowerCase();
+  return message.includes("column") && message.includes(column.toLowerCase());
+};
+
+const normalizeImagePayloadField = (payload, fieldName) => {
+  const value = payload?.avatar_url;
+  const nextPayload = { ...payload };
+  delete nextPayload.avatar_url;
+  if (value !== undefined) {
+    nextPayload[fieldName] = value;
+  }
+  return nextPayload;
+};
+
+const insertProfileWithImageFallback = async (supabase, payload) => {
+  let result = await supabase.from("profiles").insert(payload).select().single();
+  if (
+    result.error &&
+    payload.avatar_url !== undefined &&
+    hasMissingColumnError(result.error, "avatar_url")
+  ) {
+    const fallbackPayload = normalizeImagePayloadField(payload, "profile_url");
+    result = await supabase
+      .from("profiles")
+      .insert(fallbackPayload)
+      .select()
+      .single();
+  }
+  return result;
+};
+
+const updateProfileWithImageFallback = async (supabase, id, payload) => {
+  let result = await supabase
+    .from("profiles")
+    .update(payload)
+    .eq("id", id)
+    .select()
+    .single();
+  if (
+    result.error &&
+    payload.avatar_url !== undefined &&
+    hasMissingColumnError(result.error, "avatar_url")
+  ) {
+    const fallbackPayload = normalizeImagePayloadField(payload, "profile_url");
+    result = await supabase
+      .from("profiles")
+      .update(fallbackPayload)
+      .eq("id", id)
+      .select()
+      .single();
+  }
+  return result;
+};
 
 const prepareProfileUpdate = async (req, res, next) => {
   if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) {
@@ -81,13 +145,13 @@ router.get("/", async (req, res) => {
       if (!data || data.length === 0) {
         return res.status(404).json({ error: "Profile not found" });
       }
-      return res.json({ data: data[0] });
+      return res.json({ data: withProfileUrl(data[0]) });
     }
 
     const { data, error } = await supabase.from("profiles").select("*").limit(50);
 
     if (error) return res.status(400).json({ error: error.message });
-    return res.json({ data });
+    return res.json({ data: Array.isArray(data) ? data.map(withProfileUrl) : [] });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -116,7 +180,7 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    return res.json({ data });
+    return res.json({ data: withProfileUrl(data) });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -161,11 +225,10 @@ router.post("/", (req, res, next) => {
       return res.status(400).json({ error: "Missing role" });
     }
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .insert(payload)
-      .select()
-      .single();
+    const { data, error } = await insertProfileWithImageFallback(
+      supabase,
+      payload,
+    );
 
     if (error) {
       return res.status(400).json({
@@ -175,7 +238,7 @@ router.post("/", (req, res, next) => {
         code: error.code,
       });
     }
-    return res.status(201).json({ data });
+    return res.status(201).json({ data: withProfileUrl(data) });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -209,11 +272,10 @@ router.put("/", prepareProfileUpdate, validateProfile, async (req, res) => {
     }
 
     if (!existing) {
-      const { data, error } = await supabase
-        .from("profiles")
-        .insert(payload)
-        .select()
-        .single();
+      const { data, error } = await insertProfileWithImageFallback(
+        supabase,
+        payload,
+      );
 
       if (error) {
         return res.status(400).json({
@@ -223,15 +285,14 @@ router.put("/", prepareProfileUpdate, validateProfile, async (req, res) => {
           code: error.code,
         });
       }
-      return res.status(201).json({ data });
+      return res.status(201).json({ data: withProfileUrl(data) });
     }
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .update(payload)
-      .eq("id", existing.id)
-      .select()
-      .single();
+    const { data, error } = await updateProfileWithImageFallback(
+      supabase,
+      existing.id,
+      payload,
+    );
 
     if (error) {
       return res.status(400).json({
@@ -241,7 +302,7 @@ router.put("/", prepareProfileUpdate, validateProfile, async (req, res) => {
         code: error.code,
       });
     }
-    return res.status(200).json({ data });
+    return res.status(200).json({ data: withProfileUrl(data) });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

@@ -6,6 +6,15 @@ const { buildValidator } = require("../schema/validate");
 const router = express.Router();
 
 const validateWorker = buildValidator(workerSchema);
+const withProfileUrl = (item) => ({
+  ...item,
+  profile_url:
+    typeof item?.profile_url === "string"
+      ? item.profile_url
+      : typeof item?.avatar_url === "string"
+        ? item.avatar_url
+        : null,
+});
 
 router.get("/", async (req, res) => {
   try {
@@ -21,9 +30,7 @@ router.get("/", async (req, res) => {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select(
-        "id, first_name, last_name, work_types, service_area, rating, orders, years, created_at",
-      )
+      .select("*")
       .eq("role", "worker")
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -70,7 +77,7 @@ router.get("/", async (req, res) => {
       );
     }
 
-    return res.json({ data: filtered });
+    return res.json({ data: filtered.map(withProfileUrl) });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -84,9 +91,7 @@ router.get("/:id", async (req, res) => {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select(
-        "id, first_name, last_name, work_types, service_area, rating, orders, years, created_at",
-      )
+      .select("*")
       .eq("id", id)
       .eq("role", "worker")
       .single();
@@ -101,7 +106,7 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    return res.json({ data });
+    return res.json({ data: withProfileUrl(data) });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
