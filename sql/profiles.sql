@@ -5,6 +5,7 @@ create table if not exists public.profiles (
   phone_number text,
   first_name text,
   last_name text,
+  avatar_url text,
   work_types text[],
   service_area text[],
   rating numeric(3,2),

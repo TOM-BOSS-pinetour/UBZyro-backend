@@ -54,6 +54,10 @@ const profileSchema = {
       minLength: 1,
       maxLength: 60,
     },
+    avatar_url: {
+      type: ["string", "null"],
+      maxLength: 500,
+    },
     work_types: {
       type: "array",
       minItems: 1,

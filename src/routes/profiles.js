@@ -147,6 +147,9 @@ router.post("/", (req, res, next) => {
       phone_number: req.body.phone_number,
       first_name: req.body.first_name,
       last_name: req.body.last_name,
+      ...(req.body.avatar_url !== undefined
+        ? { avatar_url: req.body.avatar_url }
+        : {}),
       ...(req.body.work_types !== undefined
         ? { work_types: req.body.work_types }
         : {}),
@@ -190,6 +193,9 @@ router.put("/", prepareProfileUpdate, validateProfile, async (req, res) => {
       phone_number: req.body.phone_number,
       first_name: req.body.first_name,
       last_name: req.body.last_name,
+      ...(req.body.avatar_url !== undefined
+        ? { avatar_url: req.body.avatar_url }
+        : {}),
       ...(req.body.work_types !== undefined
         ? { work_types: req.body.work_types }
         : {}),
