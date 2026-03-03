@@ -15,6 +15,154 @@ const withProfileUrl = (item) => ({
         ? item.avatar_url
         : null,
 });
+const normalizeName = (firstName, lastName) => {
+  const first = typeof firstName === "string" ? firstName.trim() : "";
+  const last = typeof lastName === "string" ? lastName.trim() : "";
+  return `${first} ${last}`.trim() || "Хэрэглэгч";
+};
+
+const buildWorkerAggregateMap = async (supabase, workerIds) => {
+  const normalizedIds = Array.from(
+    new Set(
+      (Array.isArray(workerIds) ? workerIds : [])
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter(Boolean),
+    ),
+  );
+
+  if (normalizedIds.length === 0) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select("worker_profile_id, review_rating")
+    .in("worker_profile_id", normalizedIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const aggregateMap = new Map();
+  for (const row of Array.isArray(data) ? data : []) {
+    const workerId =
+      typeof row?.worker_profile_id === "string"
+        ? row.worker_profile_id.trim()
+        : "";
+    if (!workerId) continue;
+
+    const current = aggregateMap.get(workerId) ?? {
+      orderCount: 0,
+      reviewCount: 0,
+      reviewSum: 0,
+    };
+
+    current.orderCount += 1;
+    if (typeof row?.review_rating === "number") {
+      current.reviewCount += 1;
+      current.reviewSum += row.review_rating;
+    }
+
+    aggregateMap.set(workerId, current);
+  }
+
+  return aggregateMap;
+};
+
+const withWorkerStats = (item, aggregate) => {
+  const fallbackOrders = typeof item?.orders === "number" ? item.orders : null;
+  const fallbackRating = typeof item?.rating === "number" ? item.rating : null;
+  const reviewCount =
+    typeof aggregate?.reviewCount === "number" ? aggregate.reviewCount : 0;
+
+  const rating =
+    reviewCount > 0
+      ? Number((aggregate.reviewSum / reviewCount).toFixed(2))
+      : fallbackRating;
+  const orders =
+    typeof aggregate?.orderCount === "number"
+      ? aggregate.orderCount
+      : fallbackOrders;
+
+  return {
+    ...item,
+    rating,
+    orders,
+    review_count: reviewCount,
+  };
+};
+
+const loadWorkerReviews = async (supabase, workerId) => {
+  const { data, error } = await supabase
+    .from("orders")
+    .select(
+      "id, review_rating, review_comment, reviewed_at, user_profile_id, status, payment_status",
+    )
+    .eq("worker_profile_id", workerId)
+    .eq("status", "completed")
+    .eq("payment_status", "paid")
+    .not("review_rating", "is", null)
+    .not("review_comment", "is", null)
+    .order("reviewed_at", { ascending: false })
+    .limit(20);
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const userIds = Array.from(
+    new Set(
+      rows
+        .map((item) =>
+          typeof item?.user_profile_id === "string"
+            ? item.user_profile_id.trim()
+            : "",
+        )
+        .filter(Boolean),
+    ),
+  );
+
+  const authorByUserId = new Map();
+  if (userIds.length > 0) {
+    const { data: profileRows, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, first_name, last_name")
+      .in("id", userIds);
+
+    if (!profileError && Array.isArray(profileRows)) {
+      for (const profile of profileRows) {
+        const id = typeof profile?.id === "string" ? profile.id.trim() : "";
+        if (!id) continue;
+        authorByUserId.set(
+          id,
+          normalizeName(profile?.first_name, profile?.last_name),
+        );
+      }
+    }
+  }
+
+  return rows
+    .filter(
+      (item) =>
+        typeof item?.review_rating === "number" &&
+        typeof item?.review_comment === "string" &&
+        item.review_comment.trim().length > 0,
+    )
+    .map((item) => {
+      const userId =
+        typeof item?.user_profile_id === "string"
+          ? item.user_profile_id.trim()
+          : "";
+      return {
+        id: String(item?.id ?? ""),
+        author: authorByUserId.get(userId) ?? "Хэрэглэгч",
+        rating: item.review_rating,
+        text: item.review_comment.trim(),
+        date: typeof item?.reviewed_at === "string" ? item.reviewed_at : null,
+      };
+    });
+};
 
 router.get("/", async (req, res) => {
   try {
@@ -77,7 +225,19 @@ router.get("/", async (req, res) => {
       );
     }
 
-    return res.json({ data: filtered.map(withProfileUrl) });
+    const withImages = filtered.map(withProfileUrl);
+    const aggregateMap = await buildWorkerAggregateMap(
+      supabase,
+      withImages.map((item) => String(item?.id ?? "")),
+    );
+    const enriched = withImages.map((item) =>
+      withWorkerStats(
+        item,
+        aggregateMap.get(typeof item?.id === "string" ? item.id : ""),
+      ),
+    );
+
+    return res.json({ data: enriched });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }
@@ -106,7 +266,12 @@ router.get("/:id", async (req, res) => {
       });
     }
 
-    return res.json({ data: withProfileUrl(data) });
+    const worker = withProfileUrl(data);
+    const aggregateMap = await buildWorkerAggregateMap(supabase, [id]);
+    const reviews = await loadWorkerReviews(supabase, id);
+    const enriched = withWorkerStats(worker, aggregateMap.get(id));
+
+    return res.json({ data: { ...enriched, reviews } });
   } catch (e) {
     return res.status(500).json({ error: e.message });
   }

@@ -8,6 +8,7 @@ const userRoutes = require("./routes/users");
 const workerRoutes = require("./routes/workers");
 const orderRoutes = require("./routes/orders");
 const paymentRoutes = require("./routes/payments");
+const pushRoutes = require("./routes/push");
 
 const app = express();
 app.use(
@@ -26,5 +27,6 @@ app.use("/users", userRoutes);
 app.use("/workers", workerRoutes);
 app.use("/orders", orderRoutes);
 app.use("/payments", paymentRoutes);
+app.use("/push", pushRoutes);
 
 module.exports = app;

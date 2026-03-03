@@ -22,6 +22,9 @@ create table if not exists public.orders (
   en_route_at timestamptz,
   in_progress_at timestamptz,
   completed_at timestamptz,
+  review_rating smallint check (review_rating between 1 and 5),
+  review_comment text,
+  reviewed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
